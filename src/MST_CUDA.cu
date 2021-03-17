@@ -1,32 +1,23 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <omp.h>
-#include <time.h>
-#include <assert.h>
+#include <bits/stdc++.h>
 
-typedef struct edge {
+using namespace std;
+
+/* Every thread gets exactly one value in the unsorted array. */
+constexpr int MAX_THREADS = (1 << 9);
+
+struct edge {
     int u, v, w;
-} edge;
+    edge(int u, int v, int w): u(u), v(v), w(w) {}
+};
+
+using comparison_func_t = bool (*) (edge*, edge*);
 
 int n;
-edge* edges, *chosen_edges;
-int* par;
+edge *edges, *chosen_edges;
+int *par;
 int num_edge;
 
-int find_set(int u) {
-    if (par[u] == u) return u;
-    return par[u] = find_set(par[u]);
-}
-
-int merge_set(int u, int v) {
-    int pu = find_set(u), pv = find_set(v);
-    if (pu == pv) return 0;
-    par[pv] = pu;
-    return 1;
-}
-
-int comparison_weight(edge* x, edge* y) {
+__device__ bool comparison_weight(edge *x, edge *y) {
     if (x->w == y->w) {
         if (x->u == y->u)
             return x->v < y->v;
@@ -35,104 +26,139 @@ int comparison_weight(edge* x, edge* y) {
     return x->w < y->w;
 }
 
-int comparison_node(edge* x, edge* y) {
+__device__ bool comparison_node(edge *x, edge *y) {
     if (x->u == y->u)
         return x->v < y->v;
     return x->u < y->u;
 }
 
-void merge(edge edges[], edge larr[], int nl, edge rarr[], int nr, int (*comparison)(edge*, edge*)) {
-    int il = 0, ir = 0, j = 0;
-    while (il < nl && ir < nr) {
-        if ((*comparison)(&larr[il], &rarr[ir])) {
-            edges[j] = larr[il];
-            il++;
-        } else {
-            edges[j] = rarr[ir];
-            ir++;
-        }
-        j++;
-    }
+__device__ comparison_func_t p_comparison_weight = comparison_weight;
+__device__ comparison_func_t p_comparison_node = comparison_node;
 
-    while (il < nl) {
-        edges[j] = larr[il];
-        il++; j++;
-    }
-
-    while (ir < nr) {
-        edges[j] = rarr[ir];
-        ir++; j++;
-    }
+int get_container_length(int x) {
+    int ret = 1;
+    while (ret < x)
+        ret <<= 1;
+    return ret;
 }
 
-void merge_sort(edge edges[], int n, int (*comparison)(edge*, edge*)) {
-    if (n > 1) {
-        int m = n / 2;
-        edge larr[m], rarr[n - m];
-        memcpy(larr, edges, m * sizeof(edge));
-        memcpy(rarr, edges + m, (n - m) * sizeof(edge));
+__global__ void bitonic_sort_kernel(edge *d_edges, int j, int k, comparison_func_t comparison) {
+    unsigned int i, ixj; /* Sorting partners: i and ixj */
+    i = threadIdx.x + blockDim.x * blockIdx.x;
+    ixj = i ^ j;
+    
+    auto swap = [&](edge& x, edge& y)->void {
+        edge temp = x;
+        x = y;
+        y = temp;
+    };
 
-        #pragma omp parallel
-        {
-            #pragma omp single
-            {
-                #pragma omp task shared(larr, m, comparison)
-                merge_sort(larr, m, comparison);
-
-                #pragma omp task shared(rarr, n, m, comparison)
-                merge_sort(rarr, n - m, comparison);
-            }
-        }
-
-        merge(edges, larr, m, rarr, n - m, comparison);
-    }
+    if (ixj > i)
+        if (((i & k) != 0) == (*comparison)(&d_edges[i], &d_edges[ixj]))
+            swap(d_edges[i], d_edges[ixj]);
 }
 
-int main(int argc, char** argv) {
-    int num_thread = omp_get_max_threads();
-    // omp_set_max_active_levels(omp_get_max_threads());
+void bitonic_sort(edge *edges, int length, comparison_func_t comparison) {
+    int container_length = get_container_length(length);
+    for (int i = length; i < container_length; i++) {
+        edges[i] = edge(INT_MAX, INT_MAX, INT_MAX);
+    }
+    length = container_length;
+    
+    edge *d_edges;
+    size_t container_size = length * sizeof(edge);
 
-    clock_t t = clock();
-    scanf("%d", &n);
-    edge* edges = (edge*) malloc(n * n * sizeof(edge));
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            int x;
-            scanf("%d", &x);
-            if (x == -1) continue;
-            if (i >= j) continue;
-            edges[num_edge].u = i;
-            edges[num_edge].v = j;
-            edges[num_edge].w = x;
-            num_edge++;
+    // Copy data to gpu
+    cudaMalloc((void**) & d_edges, container_size);
+    cudaMemcpy(d_edges, edges, container_size, cudaMemcpyHostToDevice);
+    
+    // Call kernel func
+    int num_thread = min(length, MAX_THREADS);
+    int num_blocks = length / num_thread;
+    dim3 blocks(num_blocks, 1);
+    dim3 threads(num_thread, 1);
+
+    for (int k = 2; k <= length; k <<= 1) {
+        for (int j = k >> 1; j > 0; j >>= 1) {
+            bitonic_sort_kernel<<<blocks, threads>>>(d_edges, j, k, comparison);
         }
     }
-    assert(num_edge >= n - 1);
-    merge_sort(edges, num_edge, comparison_weight);
-    par = (int*) malloc(n * sizeof(int));
+
+    // Copy result from gpu
+    cudaMemcpy(edges, d_edges, container_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_edges);
+}
+
+int main(int argc, char **argv) {
+    // Copy function to device
+    comparison_func_t h_comparison_weight;
+    comparison_func_t h_comparison_node;
+    
+    cudaMemcpyFromSymbol(&h_comparison_weight, p_comparison_weight, sizeof(comparison_func_t));
+    cudaMemcpyFromSymbol(&h_comparison_node, p_comparison_node, sizeof(comparison_func_t));
+  
+    // Init clock
+    clock_t t = clock();    
+
+    // Input n
+    cin >> n;
+
+    // Initialize parents
+    par = (int * ) malloc(n * sizeof(int));
     for (int i = 0; i < n; i++) {
         par[i] = i;
     }
+    
+    function<int(int)> find_set = [&](int x) {
+        return (par[x] == x ? x : par[x] = find_set(par[x]));
+    };
+    
+    function<bool(int, int)> merge_set = [&](int u, int v) {
+        int pu = find_set(u), pv = find_set(v);
+        if (pu == pv) return false;
+        par[pv] = pu;
+        return true;
+    };
+
+    // Input edge
+    edges = (edge * ) malloc(n * n * sizeof(edge));
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            int x;
+            cin >> x;
+            if (x == -1 || i >= j) continue;
+            edges[num_edge++] = edge(i, j, x);
+        }
+    }
+    assert(num_edge >= n - 1);
+  
+    // Sort weight
+    bitonic_sort(edges, num_edge, h_comparison_weight);
+
+    // Build MST
     long long total_cost = 0;
     int num_chosen = 0;
-    chosen_edges = (edge*) malloc(num_edge * sizeof(edge));
+    chosen_edges = (edge * ) malloc(num_edge * 2 * sizeof(edge));
     for (int i = 0; i < num_edge; i++) {
-        int u = edges[i].u;
-        int v = edges[i].v;
-        int w = edges[i].w;
+        int u = edges[i].u, v = edges[i].v, w = edges[i].w;
         if (merge_set(u, v)) {
             total_cost += w;
             chosen_edges[num_chosen++] = edges[i];
             if (num_chosen == n - 1) break;
         }
     }
-    printf("%lld\n", total_cost);
-    merge_sort(chosen_edges, num_chosen, comparison_node);
+
+    // Sort chosen edge for output
+    bitonic_sort(chosen_edges, num_chosen, h_comparison_node);
+
+    // Output
+    cout << total_cost << '\n';
     for (int i = 0; i < num_chosen; i++) {
-        printf("%d-%d\n", chosen_edges[i].u, chosen_edges[i].v);
+        cout << chosen_edges[i].u << '-' << chosen_edges[i].v << '\n';
     }
     double time_taken = ((double) (clock() - t)) / CLOCKS_PER_SEC;
-    printf("Waktu Eksekusi: %f ms\n", time_taken);
+    cout << fixed << setprecision(12) << "Waktu eksekusi: " << time_taken << " ms\n";
 
+    // Return
     return 0;
 }

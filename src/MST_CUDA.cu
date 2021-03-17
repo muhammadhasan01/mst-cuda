@@ -2,7 +2,6 @@
 
 using namespace std;
 
-/* Every thread gets exactly one value in the unsorted array. */
 constexpr int MAX_THREADS = (1 << 9);
 
 struct edge {
@@ -43,19 +42,22 @@ int get_container_length(int x) {
 }
 
 __global__ void bitonic_sort_kernel(edge *d_edges, int j, int k, comparison_func_t comparison) {
-    unsigned int i, ixj; /* Sorting partners: i and ixj */
+    unsigned int i, ixj;
     i = threadIdx.x + blockDim.x * blockIdx.x;
     ixj = i ^ j;
-    
+
     auto swap = [&](edge& x, edge& y)->void {
         edge temp = x;
         x = y;
         y = temp;
     };
 
-    if (ixj > i)
-        if (((i & k) != 0) == (*comparison)(&d_edges[i], &d_edges[ixj]))
+    if (ixj > i) {
+        if (((i & k) != 0) && (*comparison)(&d_edges[i], &d_edges[ixj]))
             swap(d_edges[i], d_edges[ixj]);
+        else if (((i & k) == 0) && (*comparison)(&d_edges[ixj], &d_edges[i]))
+            swap(d_edges[i], d_edges[ixj]);
+    }
 }
 
 void bitonic_sort(edge *edges, int length, comparison_func_t comparison) {
@@ -64,14 +66,14 @@ void bitonic_sort(edge *edges, int length, comparison_func_t comparison) {
         edges[i] = edge(INT_MAX, INT_MAX, INT_MAX);
     }
     length = container_length;
-    
+
     edge *d_edges;
     size_t container_size = length * sizeof(edge);
 
     // Copy data to gpu
     cudaMalloc((void**) & d_edges, container_size);
     cudaMemcpy(d_edges, edges, container_size, cudaMemcpyHostToDevice);
-    
+
     // Call kernel func
     int num_thread = min(length, MAX_THREADS);
     int num_blocks = length / num_thread;
@@ -93,12 +95,12 @@ int main(int argc, char **argv) {
     // Copy function to device
     comparison_func_t h_comparison_weight;
     comparison_func_t h_comparison_node;
-    
+
     cudaMemcpyFromSymbol(&h_comparison_weight, p_comparison_weight, sizeof(comparison_func_t));
     cudaMemcpyFromSymbol(&h_comparison_node, p_comparison_node, sizeof(comparison_func_t));
-  
+
     // Init clock
-    clock_t t = clock();    
+    clock_t t = clock();
 
     // Input n
     cin >> n;
@@ -108,11 +110,11 @@ int main(int argc, char **argv) {
     for (int i = 0; i < n; i++) {
         par[i] = i;
     }
-    
+
     function<int(int)> find_set = [&](int x) {
         return (par[x] == x ? x : par[x] = find_set(par[x]));
     };
-    
+
     function<bool(int, int)> merge_set = [&](int u, int v) {
         int pu = find_set(u), pv = find_set(v);
         if (pu == pv) return false;
@@ -131,7 +133,7 @@ int main(int argc, char **argv) {
         }
     }
     assert(num_edge >= n - 1);
-  
+
     // Sort weight
     bitonic_sort(edges, num_edge, h_comparison_weight);
 
@@ -151,12 +153,14 @@ int main(int argc, char **argv) {
     // Sort chosen edge for output
     bitonic_sort(chosen_edges, num_chosen, h_comparison_node);
 
+    // Get duration
+    double time_taken = ((double) (clock() - t)) / CLOCKS_PER_SEC;
+
     // Output
     cout << total_cost << '\n';
     for (int i = 0; i < num_chosen; i++) {
         cout << chosen_edges[i].u << '-' << chosen_edges[i].v << '\n';
     }
-    double time_taken = ((double) (clock() - t)) / CLOCKS_PER_SEC;
     cout << fixed << setprecision(12) << "Waktu eksekusi: " << time_taken << " ms\n";
 
     // Return

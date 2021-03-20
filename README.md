@@ -12,7 +12,7 @@ nvcc -o <program_name> MST_CUDA.c && <program_name>.exe
 
 ## Approach on Getting Minimum Spanning Tree with Parallelization
 
-To get the minimum spanning tree on a particular graph, we use _Kruskal Algorithm_, which is to use an edge list with weight included, and then sort the edge list ascendingly by its weight, then add every edge from left to right in that list, without making any cycle (handled by using Disjoint Set Union). So for the sort part we use the parallelization with CUDA, here we use *bitonic sort*. 
+To get the minimum spanning tree on a particular graph, we use _Kruskal Algorithm_, which is to use an edge list with weight included, and then sort the edge list ascendingly by its weight, then add every edge from left to right in that list, without making any cycle (handled by using Disjoint Set Union). So for the sort part we use the parallelization with CUDA, here we use *bitonic sort*.
 
 <div align="center">
 
@@ -27,6 +27,7 @@ We will focus on how we use CUDA for bitonic sort parallelization. Our parallel 
 To see more detail, you can look at the implementation code [MST_CUDA.cu](./src/MST_CUDA.cu).
 
 ## Speedup Program Analyzation
+
 In this section we will compare the speed between serial and parallel program, we use google collab as the environment to run the program. Here are the results:
 
 | nodes 	| serial             	| parallel           	| speedup 	|
@@ -37,6 +38,11 @@ In this section we will compare the speed between serial and parallel program, w
 | 3000  	| 22.257306000000 ms 	| 10.049784000000 ms 	| 2.215   	|
 
 From the table above, we can see that the parallel program is generally faster than the serial program. The speedup is bigger when we use a larger dataset. That is because the parallel program has an overhead time to create, manage, and delete the thread. So, for bigger datasets the overhead time can be neglected.
+
+## Serial Program Pastebin
+
+Because the serial program is not required to be included in the repository, we attach the serial program via
+pastebin [here](https://pastebin.com/HmiM47vB).
 
 ## Authors
 

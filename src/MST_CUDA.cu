@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
     cudaMemcpyFromSymbol(&h_comparison_weight, p_comparison_weight, sizeof(comparison_func_t));
     cudaMemcpyFromSymbol(&h_comparison_node, p_comparison_node, sizeof(comparison_func_t));
 
-    // Init clock
+    // Initialize clock
     clock_t t = clock();
 
     // Input n

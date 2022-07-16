@@ -5,7 +5,7 @@ This repository is an implementation of __Minimum Spanning Tree__ (MST) with par
 
 To run the program, you need to have CUDA Setup first, you can see the details [here](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html). After that, you basically need to compile and make an executable file of the program. So, you can move to the src folder first, then you can type in the command prompt:
 
-```
+```bash
 nvcc -o <program_name> MST_CUDA.c && <program_name>.exe
 ```
 
@@ -22,7 +22,7 @@ To get the minimum spanning tree on a particular graph, we use _Kruskal Algorith
 
 **Bitonic sort** is a comparison-based sorting algorithm that can be run in parallel. It focuses on converting a random sequence of numbers into a bitonic sequence, one that monotonically increases, then decreases. Rotations of a bitonic sequence are also bitonic. You can read more about this sorting algorithm [here](https://en.wikipedia.org/wiki/Bitonic_sorter).
 
-We will focus on how we use CUDA for bitonic sort parallelization. Our parallel solution is to first make the length to the nearest power of two, and fill in the gap with large numbers (`INT_MAX`), this is because our bitonic sort implementation doesn’t use recursive and therefore needs a length with a power of $2$. And then, we use `cudaMalloc` and `cudaMemcpy` to copy the data to the GPU. We then define the number of threads (`num_threads`) with value equal to `min(length, 512)` with `length` being the length of the data array (after the addition of the dummy element). We also define the number of blocks (`num_blocks`) with value equal to the `length / num_thread`. The device function `bitonic_sort_kernel` is used for comparing and swapping unordered elements according to bitonic rules (there are increasing and decreasing orders). Last, we copy the sorted data array back from the device to the host.
+We will focus on how we use CUDA for bitonic sort parallelization. Our parallel solution is to first make the length to the nearest power of $2$, and fill in the gap with large numbers (`INT_MAX`), this is because our bitonic sort implementation doesn’t use recursive and therefore needs a length with a power of $2$. And then, we use `cudaMalloc` and `cudaMemcpy` to copy the data to the GPU. We then define the number of threads (`num_threads`) with value equal to `min(length, 512)` with `length` being the length of the data array (after the addition of the dummy element). We also define the number of blocks (`num_blocks`) with value equal to the `length / num_thread`. The device function `bitonic_sort_kernel` is used for comparing and swapping unordered elements according to bitonic rules (there are increasing and decreasing orders). Last, we copy the sorted data array back from the device to the host.
 
 To see more detail, you can look at the implementation code [MST_CUDA.cu](./src/MST_CUDA.cu).
 
